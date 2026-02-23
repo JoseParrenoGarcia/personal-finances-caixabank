@@ -1,6 +1,7 @@
 # Analysis functions (timeseries, categories)
 
 import pandas as pd
+import streamlit as st
 
 
 def daily_totals(df: pd.DataFrame) -> pd.DataFrame:
@@ -25,6 +26,7 @@ def daily_totals(df: pd.DataFrame) -> pd.DataFrame:
     return df_daily
 
 
+@st.cache_data(ttl=3600)
 def monthly_summary(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate income vs expenses per month.
@@ -51,6 +53,7 @@ def monthly_summary(df: pd.DataFrame) -> pd.DataFrame:
     return df_monthly
 
 
+@st.cache_data(ttl=3600)
 def yearly_summary(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate income vs expenses per year.
@@ -76,6 +79,7 @@ def yearly_summary(df: pd.DataFrame) -> pd.DataFrame:
     return df_yearly
 
 
+@st.cache_data(ttl=3600)
 def category_breakdown(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate total expenses by category (expenses as positive values).
@@ -125,6 +129,7 @@ def top_merchants(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:
     return df_merchants
 
 
+@st.cache_data(ttl=3600)
 def get_uncategorized(df: pd.DataFrame) -> pd.DataFrame:
     """
     Get all uncategorized transactions.
@@ -141,6 +146,7 @@ def get_uncategorized(df: pd.DataFrame) -> pd.DataFrame:
     return df_uncategorized
 
 
+@st.cache_data(ttl=3600)
 def get_summary_stats(df: pd.DataFrame) -> dict:
     """
     Calculate summary statistics for the entire dataset.
@@ -165,6 +171,7 @@ def get_summary_stats(df: pd.DataFrame) -> dict:
     }
 
 
+@st.cache_data(ttl=3600)
 def category_breakdown_with_averages(df: pd.DataFrame, months: int = 6) -> pd.DataFrame:
     """
     Calculate current month category breakdown with N-month average.
@@ -211,6 +218,7 @@ def category_breakdown_with_averages(df: pd.DataFrame, months: int = 6) -> pd.Da
     return result
 
 
+@st.cache_data(ttl=3600)
 def get_month_comparison_data(df: pd.DataFrame, target_month: str = None) -> dict:
     """
     Get current and previous month metrics with MoM % changes.
@@ -302,6 +310,7 @@ def get_month_comparison_data(df: pd.DataFrame, target_month: str = None) -> dic
     return result
 
 
+@st.cache_data(ttl=3600)
 def calculate_burn_rate(df: pd.DataFrame, target_month: str = None) -> dict:
     """
     Calculate burn rate (€/day) for a given month.
@@ -366,6 +375,7 @@ def calculate_savings_rate(income: float, expenses: float) -> float:
     return ((income - expenses) / income) * 100
 
 
+@st.cache_data(ttl=3600)
 def get_category_spend_6months(df: pd.DataFrame) -> pd.DataFrame:
     """
     Get spending by category for the last 6 months.

@@ -14,9 +14,7 @@ from analysis import (
     category_breakdown,
     get_uncategorized,
     get_summary_stats,
-    get_month_comparison_data,
     calculate_burn_rate,
-    calculate_savings_rate,
     get_category_spend_6months,
 )
 
@@ -101,129 +99,112 @@ def load_data():
 
 
 def display_overview(df, stats):
-    """Display hero section with current month KPIs and previous 2 months history."""
-    # Get comparison data for current vs previous month
-    comparison = get_month_comparison_data(df)
+    """Display last 3 months with MoM deltas for all metrics."""
+    monthly = monthly_summary(df)
 
-    if not comparison:
+    if len(monthly) == 0:
         st.info("No data available for overview")
         return
 
-    # Get burn rate for current month
-    burn_rate_data = calculate_burn_rate(df)
-    savings_rate = calculate_savings_rate(
-        comparison["current_income"],
-        comparison["current_expenses"]
-    )
+    # Get last 3 months (most recent first)
+    last_3_months = monthly.tail(3).iloc[::-1].reset_index(drop=True)
 
-    # Hero section: current month with KPIs
-    st.subheader("📊 Current Month Overview")
-
-    # Check for expense anomaly (>20% change)
-    expense_alert = None
-    if comparison["has_previous"] and comparison["expenses_change_pct"] is not None:
-        if comparison["expenses_change_pct"] > 20:
-            expense_alert = "warning"
-        elif comparison["expenses_change_pct"] < -20:
-            expense_alert = "success"
-
-    # Alert banner if significant expense change
-    if expense_alert == "warning":
-        change_amount = comparison["expenses_change_euros"]
-        change_pct = comparison["expenses_change_pct"]
-        st.warning(
-            f"⚠️ Expenses increased by €{abs(change_amount):,.2f} ({change_pct:+.1f}%) - Monitor spending!"
-        )
-    elif expense_alert == "success":
-        change_amount = comparison["expenses_change_euros"]
-        change_pct = comparison["expenses_change_pct"]
-        st.success(
-            f"✓ Expenses decreased by €{abs(change_amount):,.2f} ({change_pct:+.1f}%)"
-        )
-
-    # Hero card: 6 metrics in 3 columns
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        # Net (primary metric)
-        delta_value = None
-        if comparison["has_previous"] and comparison["net_change_pct"] is not None:
-            delta_value = f"€{comparison['net_change_euros']:+,.0f} ({comparison['net_change_pct']:+.1f}%)"
-        st.metric(
-            "Net",
-            f"€{comparison['current_net']:,.2f}",
-            delta=delta_value,
-            delta_color="normal"
-        )
-
-        # Income
-        delta_income = None
-        if comparison["has_previous"] and comparison["income_change_pct"] is not None:
-            delta_income = f"{comparison['income_change_pct']:+.1f}%"
-        st.metric(
-            "Income",
-            f"€{comparison['current_income']:,.2f}",
-            delta=delta_income
-        )
-
-    with col2:
-        # Expenses
-        delta_expenses = None
-        if comparison["has_previous"] and comparison["expenses_change_pct"] is not None:
-            delta_expenses = f"€{comparison['expenses_change_euros']:+,.0f} ({comparison['expenses_change_pct']:+.1f}%)"
-        st.metric(
-            "Expenses",
-            f"€{comparison['current_expenses']:,.2f}",
-            delta=delta_expenses,
-            delta_color="inverse"
-        )
-
-        # Savings Rate
-        st.metric(
-            "Savings Rate",
-            f"{savings_rate:.1f}%"
-        )
-
-    with col3:
-        # Burn Rate (€/day)
-        st.metric(
-            "Burn Rate",
-            f"€{burn_rate_data['burn_rate_per_day']:,.2f}/day"
-        )
-
-        # Month label
-        st.metric(
-            "Period",
-            comparison["current_month"]
-        )
-
-    st.markdown("---")
-
-    # Historical context: previous 2 months
-    st.subheader("📈 Recent History")
-    monthly = monthly_summary(df)
-
-    # Get last 3 months (most recent first) for display
-    if len(monthly) > 0:
-        last_3_months = monthly.tail(3).iloc[::-1]  # Reverse to show most recent first
-    else:
-        last_3_months = monthly
-
-    # Display in simple 4-column layout (no deltas, just raw values for context)
+    # For each month, calculate burn rate and prepare deltas
+    months_data = []
     for idx, row in last_3_months.iterrows():
-        col1, col2, col3, col4 = st.columns(4)
+        month_str = row["year_month"]
+        burn_rate_data = calculate_burn_rate(df, month_str)
+
+        months_data.append({
+            "month": month_str,
+            "income": row["income"],
+            "expenses": row["expenses"],
+            "net": row["net"],
+            "burn_rate": burn_rate_data["burn_rate_per_day"],
+        })
+
+    # Display each month as a row with 5 columns: Month, Income, Expenses, Net, Burn Rate
+    for i, month_data in enumerate(months_data):
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-            st.metric("Month", row["year_month"])
+            st.metric("Month", month_data["month"])
 
         with col2:
-            st.metric("Income", f"€{row['income']:,.2f}")
+            # Income with MoM delta (normal colors: green up, red down)
+            delta_income = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_income = months_data[i + 1]["income"]
+                delta_pct = (
+                    ((month_data["income"] - prev_income) / prev_income * 100)
+                    if prev_income != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_income = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Income",
+                f"€{month_data['income']:,.0f}",
+                delta=delta_income,
+                delta_color="normal"
+            )
 
         with col3:
-            st.metric("Expenses", f"€{row['expenses']:,.2f}")
+            # Expenses with MoM delta (inverse colors: green down, red up)
+            delta_expenses = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_expenses = months_data[i + 1]["expenses"]
+                delta_pct = (
+                    ((month_data["expenses"] - prev_expenses) / prev_expenses * 100)
+                    if prev_expenses != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_expenses = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Expenses",
+                f"€{month_data['expenses']:,.0f}",
+                delta=delta_expenses,
+                delta_color="inverse"
+            )
 
         with col4:
-            st.metric("Net", f"€{row['net']:,.2f}")
+            # Net with MoM delta (normal colors: green up, red down)
+            delta_net = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_net = months_data[i + 1]["net"]
+                delta_pct = (
+                    ((month_data["net"] - prev_net) / abs(prev_net) * 100)
+                    if prev_net != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_net = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Net",
+                f"€{month_data['net']:,.0f}",
+                delta=delta_net,
+                delta_color="normal"
+            )
+
+        with col5:
+            # Burn Rate with MoM delta (inverse colors: green down, red up)
+            delta_burn = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_burn = months_data[i + 1]["burn_rate"]
+                delta_pct = (
+                    ((month_data["burn_rate"] - prev_burn) / prev_burn * 100)
+                    if prev_burn != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_burn = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Burn Rate",
+                f"€{month_data['burn_rate']:,.0f}/day",
+                delta=delta_burn,
+                delta_color="inverse"
+            )
 
     st.markdown("---")
 
@@ -394,8 +375,8 @@ def display_category_transactions(df, category, month_str):
         st.info(f"No transactions found for {category} in {month_str}")
         return
 
-    # Sort by date descending
-    df_filtered = df_filtered.sort_values("date", ascending=False)
+    # Sort by absolute amount descending (highest to lowest)
+    df_filtered = df_filtered.sort_values("amount", key=lambda x: abs(x), ascending=False)
 
     # Display summary
     total_amount = df_filtered["amount"].sum()
@@ -574,13 +555,13 @@ def main():
     display_overview(df, stats)
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Time Series", "Categories", "Transactions", "Uncategorized"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Categories", "Time Series", "Transactions", "Uncategorized"])
 
     with tab1:
-        display_time_series(df)
+        display_categories(df)
 
     with tab2:
-        display_categories(df)
+        display_time_series(df)
 
     with tab3:
         display_transactions(df)

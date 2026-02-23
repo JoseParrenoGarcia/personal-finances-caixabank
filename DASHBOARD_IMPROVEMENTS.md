@@ -7,40 +7,11 @@
 
 ## Executive Summary
 
-Your dashboard has solid foundations but significant opportunities for improvement. The main issues: **inverted information hierarchy** (most valuable insights buried in tabs), **missing comparative context** (no trends or anomalies highlighted), and **cognitive overload** from excessive navigation.
-
-**Expected Impact:**
-- ⏱️ **50% faster monthly reviews** (5-10 min vs 15-20 min)
-- 🎯 **Immediate anomaly detection** (vs manual hunting)
-- 📊 **Single-page dashboard** (vs 4 tabs + sub-tabs)
-- 🚨 **Auto-highlighted insights** (vs raw data viewing)
+Your dashboard has solid foundations but significant opportunities for improvement.
 
 ---
 
 ## Ideas to implement
-
-### Hero card
-
-```
-┌──────────────────────────────────────────────────────┐
-│ 📊 CURRENT MONTH SNAPSHOT                            │
-├──────────────────────────────────────────────────────┤
-│ 🏦 Net: €1,234 (+15% ↑)       📊 Burn Rate: €75/day  │
-│ 💰 Income: €3,500             📈 Savings Rate: 25%   │
-│ 💸 Expenses: €2,266 (-€150 ↓ vs last month)          │
-├──────────────────────────────────────────────────────┤
-```
-
-**Key Features:**
-- Focus on current month with comparisons built-in
-- KPIs: savings rate, burn rate
-- Auto-detect spending anomalies (>20% change = alert)
-- Visual indicators: ▲▼ arrows, color coding
-- We could probably re-use this if needed with other months
-
-**The metrics cards could also be used, but the interesting thing is adding more KPIs, and a MoM comparison**
-
----
 
 ### 2 views - savings account and spending account
 
@@ -79,18 +50,6 @@ The savings account needs to be defined.
 
 ---
 
-### Ideas for better Category Visualizations
-
-#### Chart: Stacked Area (6 months)
-Shows spending composition over time
-- X-axis: Months
-- Y-axis: Total spend (€)
-- Colored areas: Each category (stacked)
-- Top 8 categories + "Other" bucket
-
-
----
-
 ### Notable Transactions
 
 **Auto-surface transactions that need attention:**
@@ -112,10 +71,6 @@ Unusual Amounts (>2x Category Average):
 ---
 
 ### Add Missing KPIs
-
-**1. Key Performance Indicators:**
-- **Savings Rate:** `(Income - Expenses) / Income × 100`
-- **Burn Rate:** Expenses per day
 
 **2. Period Comparisons:**
 - Always show: "vs last month", "vs 3-month avg"
