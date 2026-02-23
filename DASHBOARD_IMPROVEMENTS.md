@@ -40,12 +40,6 @@ Your dashboard has solid foundations but significant opportunities for improveme
 
 **The metrics cards could also be used, but the interesting thing is adding more KPIs, and a MoM comparison**
 
-│ 💡 TOP 3 SPENDING CHANGES (vs 3-month avg)           │
-│ 🚨 Groceries    €450  [▲ +35%]  ← RED ALERT          │
-│ ⚠️ Transport    €180  [▼ -12%]                       │
-│ ✅ Dining       €210  [▲ +8%]                        │
-└──────────────────────────────────────────────────────┘
-
 ---
 
 ### 2 views - savings account and spending account
