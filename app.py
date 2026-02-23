@@ -16,6 +16,10 @@ from analysis import (
     get_summary_stats,
     calculate_burn_rate,
     get_category_spend_6months,
+    get_highest_expense,
+    get_new_merchants,
+    get_unusual_amounts,
+    get_category_comparison_data,
 )
 
 # Predefined colors for categories
@@ -438,11 +442,71 @@ def display_stacked_area_chart(df):
     st.plotly_chart(fig, use_container_width=True)
 
 
+def display_category_comparison(df):
+    """Display category comparison table with current, last month, 3-month avg, and deltas."""
+    st.subheader("Category Comparison")
+
+    comparison_data = get_category_comparison_data(df)
+
+    if len(comparison_data) == 0:
+        st.info("Not enough data for category comparison")
+        return
+
+    # Prepare display dataframe
+    display_df = comparison_data.copy()
+    display_df = display_df.sort_values("current", ascending=False)
+
+    # Create columns for display
+    display_df["Current"] = display_df["current"].apply(lambda x: f"€{x:,.0f}")
+    display_df["Last Month"] = display_df["last_month"].apply(
+        lambda x: f"€{x:,.0f}" if x > 0 else "—"
+    )
+    display_df["3M Avg"] = display_df["three_month_avg"].apply(lambda x: f"€{x:,.0f}")
+
+    # MoM change with indicator
+    def format_mom_change(row):
+        pct = row["mom_change_pct"]
+        if pd.isna(pct):
+            return "—"
+        euros = row["current"] - row["last_month"]
+        if pct > 0:
+            emoji = "🔴"  # Red: spending increased (bad)
+        elif pct < 0:
+            emoji = "🟢"  # Green: spending decreased (good)
+        else:
+            emoji = "🔵"  # Blue: no change
+        return f"{emoji} {pct:+.0f}% (€{euros:+,.0f})"
+
+    display_df["vs Last Month"] = display_df.apply(format_mom_change, axis=1)
+
+    # vs Avg change with indicator
+    def format_vs_avg_change(row):
+        pct = row["vs_avg_change_pct"]
+        if pd.isna(pct):
+            return "—"
+        euros = row["vs_avg_euros"]
+        if pct > 0:
+            emoji = "🔴"  # Red: spending above average (bad)
+        elif pct < 0:
+            emoji = "🟢"  # Green: spending below average (good)
+        else:
+            emoji = "🔵"  # Blue: at average
+        return f"{emoji} {pct:+.0f}% (€{euros:+,.0f})"
+
+    display_df["vs 3M Avg"] = display_df.apply(format_vs_avg_change, axis=1)
+
+    # Select columns to display
+    final_df = display_df[["category", "Current", "Last Month", "3M Avg", "vs Last Month", "vs 3M Avg"]].copy()
+    final_df = final_df.rename(columns={"category": "Category"})
+
+    st.dataframe(final_df, use_container_width=True, hide_index=True)
+
+
 def display_categories(df):
     """Display category analysis for current and previous 2 months."""
     st.subheader("Category Analysis")
 
-    tab1, tab2 = st.tabs(["Horizontal Bar", "Spending Trends"])
+    tab1, tab2, tab3 = st.tabs(["Horizontal Bar", "Category Comparison", "Spending Trends"])
 
     with tab1:
         col1, col2 = st.columns([2, 1])
@@ -470,39 +534,108 @@ def display_categories(df):
                 display_category_transactions(df, selected_category, selected_month)
 
     with tab2:
+        display_category_comparison(df)
+
+    with tab3:
         display_stacked_area_chart(df)
 
 
 def display_transactions(df):
-    """Display searchable transaction table."""
-    st.subheader("All Transactions")
+    """Display transaction table with notable transactions insights."""
+    st.subheader("Transactions")
 
-    # Search/filter
-    col1, col2 = st.columns(2)
-    with col1:
-        search = st.text_input("Search description")
-    with col2:
-        selected_category = st.selectbox("Filter by category", ["All"] + df["category"].unique().tolist())
+    # Sub-tabs: All Transactions vs Notable Transactions
+    tab1, tab2 = st.tabs(["All Transactions", "Notable Transactions"])
 
-    df_filtered = df.copy()
+    with tab1:
+        # Search/filter
+        col1, col2 = st.columns(2)
+        with col1:
+            search = st.text_input("Search description")
+        with col2:
+            selected_category = st.selectbox("Filter by category", ["All"] + df["category"].unique().tolist())
 
-    if search:
-        df_filtered = df_filtered[df_filtered["description"].str.contains(search, case=False, na=False)]
+        df_filtered = df.copy()
 
-    if selected_category != "All":
-        df_filtered = df_filtered[df_filtered["category"] == selected_category]
+        if search:
+            df_filtered = df_filtered[df_filtered["description"].str.contains(search, case=False, na=False)]
 
-    # Sort by date descending (newest first)
-    df_filtered = df_filtered.sort_values("date", ascending=False)
+        if selected_category != "All":
+            df_filtered = df_filtered[df_filtered["category"] == selected_category]
 
-    # Display table
-    display_df = df_filtered[["date", "description", "amount", "category", "balance"]].copy()
-    display_df["date"] = display_df["date"].dt.strftime("%d/%m/%Y")
-    display_df["amount"] = display_df["amount"].apply(lambda x: f"€{x:,.2f}")
-    display_df["balance"] = display_df["balance"].apply(lambda x: f"€{x:,.2f}")
+        # Sort by date descending (newest first)
+        df_filtered = df_filtered.sort_values("date", ascending=False)
 
-    st.info(f"Showing {len(display_df)} transactions")
-    st.dataframe(display_df, use_container_width=True)
+        # Display table
+        display_df = df_filtered[["date", "description", "amount", "category", "balance"]].copy()
+        display_df["date"] = display_df["date"].dt.strftime("%d/%m/%Y")
+        display_df["amount"] = display_df["amount"].apply(lambda x: f"€{x:,.2f}")
+        display_df["balance"] = display_df["balance"].apply(lambda x: f"€{x:,.2f}")
+
+        st.info(f"Showing {len(display_df)} transactions")
+        st.dataframe(display_df, use_container_width=True)
+
+    with tab2:
+        display_notable_transactions(df)
+
+
+def display_notable_transactions(df):
+    """Display highlighted notable transactions (highest expense, new merchants, unusual amounts)."""
+    st.markdown("### 🚨 Notable Transactions (Current Month)")
+
+    # Get current month
+    df_copy = df.copy()
+    df_copy["year_month"] = df_copy["date"].dt.to_period("M").astype(str)
+    current_month = df_copy["year_month"].max()
+
+    # 1. Highest Single Expense
+    st.markdown("#### 📍 Highest Single Expense")
+    highest = get_highest_expense(df)
+
+    if len(highest) > 0:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Amount", f"€{abs(highest['amount']):,.2f}")
+        with col2:
+            st.metric("Date", highest['date'].strftime("%d/%m/%Y"))
+        with col3:
+            st.metric("Merchant", highest['description'][:20])
+        with col4:
+            st.metric("Category", highest['category'])
+    else:
+        st.info("No expenses found in current month")
+
+    st.divider()
+
+    # 2. New Merchants
+    st.markdown("#### 🆕 New Merchants (First Time)")
+    new_merchants = get_new_merchants(df, limit=5)
+
+    if len(new_merchants) > 0:
+        display_df = new_merchants.copy()
+        display_df["date"] = display_df["date"].dt.strftime("%d/%m/%Y")
+        display_df["amount"] = display_df["amount"].apply(lambda x: f"€{x:,.2f}")
+
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No new merchants in current month")
+
+    st.divider()
+
+    # 3. Unusual Amounts
+    st.markdown("#### ⚠️ Unusual Amounts (>2x Category Average)")
+    unusual = get_unusual_amounts(df, multiplier=2.0, limit=5)
+
+    if len(unusual) > 0:
+        display_df = unusual.copy()
+        display_df["date"] = display_df["date"].dt.strftime("%d/%m/%Y")
+        display_df["amount"] = display_df["amount"].apply(lambda x: f"€{x:,.2f}")
+        display_df["avg"] = display_df["avg"].apply(lambda x: f"€{x:,.2f}")
+        display_df["ratio"] = display_df["ratio"].apply(lambda x: f"{x:.1f}x")
+
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No unusual amounts detected in current month")
 
 
 def display_uncategorized(df):
