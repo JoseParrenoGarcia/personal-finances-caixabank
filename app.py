@@ -2,23 +2,22 @@
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
-import os
 
-from data_loader import load_csv, load_csv_from_bytes, load_all_csv_files
+from data_loader import load_csv_from_bytes, load_all_csv_files
 from categories import add_categories
 from analysis import (
-    daily_totals,
     monthly_summary,
     yearly_summary,
     category_breakdown,
-    category_breakdown_with_averages,
-    top_merchants,
     get_uncategorized,
     get_summary_stats,
+    get_month_comparison_data,
+    calculate_burn_rate,
+    calculate_savings_rate,
+    get_category_spend_6months,
 )
 
 # Predefined colors for categories
@@ -102,17 +101,115 @@ def load_data():
 
 
 def display_overview(df, stats):
-    """Display monthly metrics for current and previous 2 months."""
-    # Get monthly summary
+    """Display hero section with current month KPIs and previous 2 months history."""
+    # Get comparison data for current vs previous month
+    comparison = get_month_comparison_data(df)
+
+    if not comparison:
+        st.info("No data available for overview")
+        return
+
+    # Get burn rate for current month
+    burn_rate_data = calculate_burn_rate(df)
+    savings_rate = calculate_savings_rate(
+        comparison["current_income"],
+        comparison["current_expenses"]
+    )
+
+    # Hero section: current month with KPIs
+    st.subheader("📊 Current Month Overview")
+
+    # Check for expense anomaly (>20% change)
+    expense_alert = None
+    if comparison["has_previous"] and comparison["expenses_change_pct"] is not None:
+        if comparison["expenses_change_pct"] > 20:
+            expense_alert = "warning"
+        elif comparison["expenses_change_pct"] < -20:
+            expense_alert = "success"
+
+    # Alert banner if significant expense change
+    if expense_alert == "warning":
+        change_amount = comparison["expenses_change_euros"]
+        change_pct = comparison["expenses_change_pct"]
+        st.warning(
+            f"⚠️ Expenses increased by €{abs(change_amount):,.2f} ({change_pct:+.1f}%) - Monitor spending!"
+        )
+    elif expense_alert == "success":
+        change_amount = comparison["expenses_change_euros"]
+        change_pct = comparison["expenses_change_pct"]
+        st.success(
+            f"✓ Expenses decreased by €{abs(change_amount):,.2f} ({change_pct:+.1f}%)"
+        )
+
+    # Hero card: 6 metrics in 3 columns
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        # Net (primary metric)
+        delta_value = None
+        if comparison["has_previous"] and comparison["net_change_pct"] is not None:
+            delta_value = f"€{comparison['net_change_euros']:+,.0f} ({comparison['net_change_pct']:+.1f}%)"
+        st.metric(
+            "Net",
+            f"€{comparison['current_net']:,.2f}",
+            delta=delta_value,
+            delta_color="normal"
+        )
+
+        # Income
+        delta_income = None
+        if comparison["has_previous"] and comparison["income_change_pct"] is not None:
+            delta_income = f"{comparison['income_change_pct']:+.1f}%"
+        st.metric(
+            "Income",
+            f"€{comparison['current_income']:,.2f}",
+            delta=delta_income
+        )
+
+    with col2:
+        # Expenses
+        delta_expenses = None
+        if comparison["has_previous"] and comparison["expenses_change_pct"] is not None:
+            delta_expenses = f"€{comparison['expenses_change_euros']:+,.0f} ({comparison['expenses_change_pct']:+.1f}%)"
+        st.metric(
+            "Expenses",
+            f"€{comparison['current_expenses']:,.2f}",
+            delta=delta_expenses,
+            delta_color="inverse"
+        )
+
+        # Savings Rate
+        st.metric(
+            "Savings Rate",
+            f"{savings_rate:.1f}%"
+        )
+
+    with col3:
+        # Burn Rate (€/day)
+        st.metric(
+            "Burn Rate",
+            f"€{burn_rate_data['burn_rate_per_day']:,.2f}/day"
+        )
+
+        # Month label
+        st.metric(
+            "Period",
+            comparison["current_month"]
+        )
+
+    st.markdown("---")
+
+    # Historical context: previous 2 months
+    st.subheader("📈 Recent History")
     monthly = monthly_summary(df)
 
-    # Get last 3 months (most recent first)
+    # Get last 3 months (most recent first) for display
     if len(monthly) > 0:
         last_3_months = monthly.tail(3).iloc[::-1]  # Reverse to show most recent first
     else:
         last_3_months = monthly
 
-    # Display metrics for each month
+    # Display in simple 4-column layout (no deltas, just raw values for context)
     for idx, row in last_3_months.iterrows():
         col1, col2, col3, col4 = st.columns(4)
 
@@ -314,11 +411,53 @@ def display_category_transactions(df, category, month_str):
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
+def display_stacked_area_chart(df):
+    """Display stacked area chart showing spending composition over 6 months."""
+    st.subheader("Spending Composition (6 Months)")
+
+    # Get 6-month category data
+    spend_data = get_category_spend_6months(df)
+
+    if len(spend_data) == 0:
+        st.info("Not enough data for 6-month comparison")
+        return
+
+    # Create pivot table: months as index, categories as columns
+    pivot_data = spend_data.pivot(index="month", columns="category", values="total").fillna(0)
+
+    # Create stacked area chart
+    fig = go.Figure()
+
+    # Add a trace for each category
+    for category in pivot_data.columns:
+        color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["Uncategorized"])
+        fig.add_trace(go.Scatter(
+            x=pivot_data.index,
+            y=pivot_data[category],
+            mode="lines",
+            name=category,
+            line=dict(color=color, width=2),
+            fillcolor=color,
+            stackgroup="one",
+            hovertemplate=f"{category}<br>€%{{y:,.0f}}<extra></extra>",
+        ))
+
+    fig.update_layout(
+        title="Category Spending Trends (6 Months)",
+        xaxis_title="Month",
+        yaxis_title="Spending (€)",
+        hovermode="x unified",
+        height=500,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def display_categories(df):
     """Display category analysis for current and previous 2 months."""
     st.subheader("Category Analysis")
 
-    tab1, tab2 = st.tabs(["Horizontal Bar" , "TBC"])
+    tab1, tab2 = st.tabs(["Horizontal Bar", "Spending Trends"])
 
     with tab1:
         col1, col2 = st.columns([2, 1])
@@ -344,6 +483,9 @@ def display_categories(df):
             # Display transactions for selected month and category
             if selected_month and selected_category:
                 display_category_transactions(df, selected_category, selected_month)
+
+    with tab2:
+        display_stacked_area_chart(df)
 
 
 def display_transactions(df):
