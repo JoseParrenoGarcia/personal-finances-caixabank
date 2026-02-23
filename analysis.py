@@ -163,3 +163,49 @@ def get_summary_stats(df: pd.DataFrame) -> dict:
         "date_to": df["date"].max(),
         "transaction_count": len(df),
     }
+
+
+def category_breakdown_with_averages(df: pd.DataFrame, months: int = 6) -> pd.DataFrame:
+    """
+    Calculate current month category breakdown with N-month average.
+
+    Args:
+        df: DataFrame with 'date', 'category', and 'amount' columns
+        months: Number of months to average (default 6)
+
+    Returns:
+        DataFrame with columns: category, current, avg, difference
+    """
+    df_copy = df.copy()
+    df_copy["year_month"] = df_copy["date"].dt.to_period("M")
+
+    # Get current month (most recent)
+    current_month = df_copy["year_month"].max()
+    df_current = df_copy[df_copy["year_month"] == current_month]
+
+    # Get current month breakdown
+    current_breakdown = category_breakdown(df_current)
+
+    # Get N most recent months for averaging
+    all_months = sorted(df_copy["year_month"].unique())
+    months_for_avg = all_months[-months:] if len(all_months) >= months else all_months
+    df_history = df_copy[df_copy["year_month"].isin(months_for_avg)]
+
+    # Calculate average per category across all months
+    df_history_expenses = df_history[df_history["amount"] < 0].copy()
+    df_avg = df_history_expenses.groupby("category").apply(
+        lambda x: pd.Series({
+            "avg": abs(x["amount"].sum()) / len(months_for_avg),
+        })
+    ).reset_index()
+
+    # Merge current and average
+    result = current_breakdown[["category", "total"]].rename(columns={"total": "current"})
+    result = result.merge(df_avg, on="category", how="left")
+    result["avg"] = result["avg"].fillna(0)
+    result["difference"] = result["current"] - result["avg"]
+
+    # Sort by current spending descending
+    result = result.sort_values("current", ascending=True)  # ascending for horizontal bar
+
+    return result

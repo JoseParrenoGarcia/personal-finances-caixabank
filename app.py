@@ -8,13 +8,14 @@ from plotly.subplots import make_subplots
 from pathlib import Path
 import os
 
-from data_loader import load_csv, load_csv_from_bytes
+from data_loader import load_csv, load_csv_from_bytes, load_all_csv_files
 from categories import add_categories
 from analysis import (
     daily_totals,
     monthly_summary,
     yearly_summary,
     category_breakdown,
+    category_breakdown_with_averages,
     top_merchants,
     get_uncategorized,
     get_summary_stats,
@@ -66,32 +67,36 @@ def load_data():
     """Load CSV data from folder or uploaded file."""
     data_folder = Path("data")
 
-    # Try to load from data/ folder first
-    csv_files = list(data_folder.glob("*.csv")) if data_folder.exists() else []
-
     # Sidebar: file selection/upload
     st.sidebar.header("Data Source")
 
+    # Try to load all CSV files from data/ folder
+    csv_files = list(data_folder.glob("*.csv")) if data_folder.exists() else []
+
     if csv_files:
         st.sidebar.info(f"Found {len(csv_files)} CSV file(s) in data/ folder")
-        file_path = csv_files[0]  # Load first file
-        st.sidebar.text(f"Loading: {file_path.name}")
-        df = load_csv(str(file_path))
+        df = load_all_csv_files("data")
+        if df is not None:
+            st.sidebar.text(f"Loaded {len(df)} transactions from {len(csv_files)} account(s)")
     else:
         st.sidebar.warning("No CSV files found in data/ folder")
         df = None
 
-    # File uploader
+    # File uploader for additional data
     st.sidebar.subheader("Or upload a file")
     uploaded_file = st.sidebar.file_uploader("Upload CaixaBank CSV", type="csv")
 
     if uploaded_file is not None:
         try:
-            df = load_csv_from_bytes(uploaded_file)
-            st.sidebar.success(f"Loaded {len(df)} transactions")
+            df_uploaded = load_csv_from_bytes(uploaded_file)
+            st.sidebar.success(f"Loaded {len(df_uploaded)} transactions")
+            # Merge with existing data if present
+            if df is not None:
+                df = pd.concat([df, df_uploaded], ignore_index=True).sort_values("date").reset_index(drop=True)
+            else:
+                df = df_uploaded
         except Exception as e:
             st.sidebar.error(f"Error loading file: {e}")
-            df = None
 
     return df
 
@@ -149,12 +154,8 @@ def display_time_series(df):
         st.plotly_chart(fig, use_container_width=True)
 
 
-def display_categories(df):
-    """Display category analysis for current and previous 2 months."""
-    st.subheader("Category Analysis")
-
-    tab1, tab2 = st.tabs(["Bar Chart", "Table"])
-
+def display_horizontal_bar_chart(df):
+    """Display 3 horizontal bar charts for current and previous 2 months (columns layout)."""
     # Get monthly data
     monthly = monthly_summary(df)
 
@@ -162,63 +163,141 @@ def display_categories(df):
     if len(monthly) > 0:
         last_3_months = monthly.tail(3).iloc[::-1]  # Reverse to show most recent first
     else:
-        last_3_months = monthly
+        st.info("No data available for chart")
+        return
 
-    with tab1:
-        # Add year_month column to df
-        df["year_month"] = df["date"].dt.to_period("M").astype(str)
+    # Add year_month column to df
+    df["year_month"] = df["date"].dt.to_period("M").astype(str)
 
-        # Collect data for all 3 months
-        months_data = []
-        for idx, row in last_3_months.iterrows():
-            month_str = row["year_month"]
-            df_month = df[df["year_month"] == month_str]
-            cat_data = category_breakdown(df_month)
-            months_data.append((month_str, cat_data))
+    # Collect data for all 3 months
+    months_data = []
+    for idx, row in last_3_months.iterrows():
+        month_str = row["year_month"]
+        df_month = df[df["year_month"] == month_str]
+        cat_data = category_breakdown(df_month)
+        months_data.append((month_str, cat_data))
 
-        # Find global max value for consistent y-axis scale
-        global_max = 0
-        for month_str, cat_data in months_data:
-            if len(cat_data) > 0:
-                global_max = max(global_max, cat_data["total"].max())
+    # Find global max value for consistent x-axis scale
+    global_max = 0
+    for month_str, cat_data in months_data:
+        if len(cat_data) > 0:
+            global_max = max(global_max, cat_data["total"].max())
 
-        # Create subplots with shared y-axis
-        fig = make_subplots(
-            rows=3, cols=1,
-            subplot_titles=[month for month, _ in months_data],
-            shared_yaxes=False,
-            vertical_spacing=0.1
-        )
+    # Create consistent category order based on logic:
+    # 1. Categories in first month, sorted by spend descending
+    # 2. Categories NOT in first month (missing), sorted by spend
 
-        # Add traces for each month
-        for row_idx, (month_str, cat_data) in enumerate(months_data, start=1):
-            if len(cat_data) > 0:
-                # Map colors to categories
-                bar_colors = [CATEGORY_COLORS.get(cat, CATEGORY_COLORS["Uncategorized"]) for cat in cat_data["category"]]
+    first_month_categories = set(months_data[0][1]["category"].values)
 
-                fig.add_trace(
-                    go.Bar(
-                        x=cat_data["category"],
-                        y=cat_data["total"],
-                        text=[f"€{val:,.0f}" for val in cat_data["total"]],
-                        textposition="outside",
-                        name=month_str,
-                        marker=dict(color=bar_colors),
-                        showlegend=False
-                    ),
-                    row=row_idx, col=1
-                )
-                fig.update_xaxes(tickangle=-45, row=row_idx, col=1)
-                # Set same y-axis range for all subplots
-                fig.update_yaxes(range=[0, global_max * 1.1], row=row_idx, col=1)
+    # Get categories in first month, sorted by spend ascending (so they appear descending on chart)
+    first_month_data = months_data[0][1].sort_values("total", ascending=True)
+    first_month_order = first_month_data["category"].tolist()
 
-        fig.update_layout(height=1000, showlegend=False)
-        fig.update_yaxes(title_text="Amount (€)", row=1, col=1)
+    # Get all categories from all months
+    all_categories = set()
+    for _, cat_data in months_data:
+        all_categories.update(cat_data["category"].values)
+
+    # Get missing categories (not in first month but in others)
+    missing_categories = sorted(all_categories - first_month_categories)
+
+    # Combine: missing categories first (will appear at bottom), then first month categories
+    category_order = missing_categories + first_month_order
+
+    # Create subplots with 3 columns
+    fig = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=[month for month, _ in months_data],
+        shared_yaxes=True,
+        horizontal_spacing=0.05
+    )
+
+    # Add traces for each month
+    for col_idx, (month_str, cat_data) in enumerate(months_data, start=1):
+        if len(cat_data) > 0:
+            # Reindex to use consistent category order from all months
+            cat_data = cat_data.set_index("category").reindex(category_order).reset_index()
+            cat_data["total"] = cat_data["total"].fillna(0)
+
+            # Map colors to categories
+            bar_colors = [CATEGORY_COLORS.get(cat, CATEGORY_COLORS["Uncategorized"]) for cat in cat_data["category"]]
+
+            # Add horizontal bar for this month
+            fig.add_trace(
+                go.Bar(
+                    y=cat_data["category"],
+                    x=cat_data["total"],
+                    orientation="h",
+                    text=[f"€{val:,.0f}" for val in cat_data["total"]],
+                    textposition="outside",
+                    marker=dict(color=bar_colors),
+                    showlegend=False,
+                    hovertemplate="%{y}: €%{x:,.0f}<extra></extra>",
+                ),
+                row=1, col=col_idx
+            )
+
+            # Update x-axis range for consistency
+            fig.update_xaxes(range=[0, global_max * 1.15], row=1, col=col_idx)
+
+    # Set x-axis titles
+    fig.update_xaxes(title_text="Amount (€)", row=1, col=1)
+    fig.update_xaxes(title_text="Amount (€)", row=1, col=2)
+    fig.update_xaxes(title_text="Amount (€)", row=1, col=3)
+
+    # Add faint gridlines and axis lines
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor="rgba(200, 200, 200, 0.3)",
+        showline=True,
+        linewidth=1,
+        linecolor="rgba(100, 100, 100, 0.3)",
+        row=1, col=1
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor="rgba(200, 200, 200, 0.3)",
+        showline=True,
+        linewidth=1,
+        linecolor="rgba(100, 100, 100, 0.3)",
+        row=1, col=2
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor="rgba(200, 200, 200, 0.3)",
+        showline=True,
+        linewidth=1,
+        linecolor="rgba(100, 100, 100, 0.3)",
+        row=1, col=3
+    )
+
+    fig.update_yaxes(
+        showline=True,
+        linewidth=1,
+        linecolor="rgba(100, 100, 100, 0.3)",
+        row=1, col=1
+    )
+
+    height = 400 + (len(months_data[0][1]) * 25 if months_data else 0)
+    fig.update_layout(height=height, showlegend=False)
+
+    # Use narrower column to constrain width
+    col1, col2 = st.columns([2, 1])
+    with col1:
         st.plotly_chart(fig, use_container_width=True)
 
-    with tab2:
-        cat_data = category_breakdown(df)
-        st.dataframe(cat_data, use_container_width=True)
+
+def display_categories(df):
+    """Display category analysis for current and previous 2 months."""
+    st.subheader("Category Analysis")
+
+    tab1, tab2 = st.tabs(["Horizontal Bar" , "TBC"])
+
+    with tab1:
+        display_horizontal_bar_chart(df)
 
 
 def display_transactions(df):
