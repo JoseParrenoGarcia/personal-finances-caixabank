@@ -284,10 +284,34 @@ def display_horizontal_bar_chart(df):
     height = 400 + (len(months_data[0][1]) * 25 if months_data else 0)
     fig.update_layout(height=height, showlegend=False)
 
-    # Use narrower column to constrain width
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def display_category_transactions(df, category, month_str):
+    """Display transactions for a selected category and month."""
+    # Filter by month and category
+    df["year_month"] = df["date"].dt.to_period("M").astype(str)
+    df_filtered = df[(df["year_month"] == month_str) & (df["category"] == category)].copy()
+
+    if len(df_filtered) == 0:
+        st.info(f"No transactions found for {category} in {month_str}")
+        return
+
+    # Sort by date descending
+    df_filtered = df_filtered.sort_values("date", ascending=False)
+
+    # Display summary
+    total_amount = df_filtered["amount"].sum()
+    num_transactions = len(df_filtered)
+    st.metric("Total", f"€{abs(total_amount):,.2f}")
+    st.caption(f"{num_transactions} transaction(s)")
+
+    # Display table
+    display_df = df_filtered[["date", "description", "amount"]].copy()
+    display_df["date"] = display_df["date"].dt.strftime("%d/%m/%Y")
+    display_df["amount"] = display_df["amount"].apply(lambda x: f"€{x:,.2f}")
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
 def display_categories(df):
@@ -297,7 +321,29 @@ def display_categories(df):
     tab1, tab2 = st.tabs(["Horizontal Bar" , "TBC"])
 
     with tab1:
-        display_horizontal_bar_chart(df)
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            display_horizontal_bar_chart(df)
+
+        with col2:
+            st.markdown("**Filter Transactions**")
+
+            # Get available months
+            df["year_month"] = df["date"].dt.to_period("M").astype(str)
+            available_months = sorted(df["year_month"].unique(), reverse=True)
+
+            # Month dropdown
+            selected_month = st.selectbox("Month", available_months, key="month_select")
+
+            # Category dropdown
+            df_filtered_month = df[df["year_month"] == selected_month]
+            available_categories = sorted(df_filtered_month["category"].unique())
+            selected_category = st.selectbox("Category", available_categories, key="category_select", placeholder="Groceries")
+
+            # Display transactions for selected month and category
+            if selected_month and selected_category:
+                display_category_transactions(df, selected_category, selected_month)
 
 
 def display_transactions(df):
