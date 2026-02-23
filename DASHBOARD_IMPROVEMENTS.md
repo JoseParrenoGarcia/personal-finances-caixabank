@@ -29,10 +29,6 @@ The savings account needs to be defined.
 │ - Horizontal bar charts.             │
 │ - Heatmap                            │
 │ - Spending changes (vs 3-month  avg) │
-│ - If possible, when I click on a bar |
-│ in the plotly chart, then show a     |
-│ table with the transactions associa  |
-│ with the bar.                        |
 ├──────────────────────────────────────┤
 │ TAB TRANSACTIONS                     │ <- see Notable Transactions section for ideas
 │ - A table to look at amounts         │
@@ -47,28 +43,6 @@ The savings account needs to be defined.
 └──────────────────────────────────────┘
 ```
 
-
----
-
-### Notable Transactions
-
-**Auto-surface transactions that need attention:**
-
-```
-🚨 NOTABLE TRANSACTIONS (This Month)
-
-Highest Single Expense:
-📍 15/02 - IKEA - €524.50 [Shopping]
-
-New Merchants (First Time):
-📍 12/02 - HOTEL Barcelona - €180 [Travel]
-📍 08/02 - ZARA HOME - €65.20 [Shopping]
-
-Unusual Amounts (>2x Category Average):
-📍 20/02 - MERCADONA - €215.30 [Groceries] (avg: €85)
-```
-
----
 
 ### Add Missing KPIs
 
@@ -147,31 +121,3 @@ from rapidfuzz import fuzz  # Already in requirements.txt!
 if fuzz.partial_ratio(description, keyword) > 85:
     category = matched_category
 ```
-
----
-
-## Performance Optimization
-
-**Add caching to expensive operations:**
-
-```python
-@st.cache_data(ttl=3600)  # 1 hour cache
-def load_and_process_data(file_path):
-    df = load_csv(file_path)
-    add_categories(df)
-    return df
-
-@st.cache_data(ttl=3600)
-def calculate_all_analyses(df):
-    return {
-        "monthly": monthly_summary(df),
-        "categories": category_breakdown(df),
-        "notable": get_notable_transactions(df),
-        "kpis": calculate_kpis(df),
-    }
-```
-
-**Benefits:**
-- Instant re-renders on interactions
-- No loading spinners
-- Better UX overall
