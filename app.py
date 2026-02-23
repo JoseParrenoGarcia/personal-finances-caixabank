@@ -6,8 +6,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
 
-from data_loader import load_csv_from_bytes, load_all_csv_files
-from categories import add_categories
+from data_loader import load_csv_from_bytes, load_all_csv_files, load_savings_csv
+from categories import add_categories, categorize_savings_transaction
 from analysis import (
     monthly_summary,
     yearly_summary,
@@ -20,6 +20,11 @@ from analysis import (
     get_new_merchants,
     get_unusual_amounts,
     get_category_comparison_data,
+    get_savings_balance_timeseries,
+    get_savings_monthly_growth,
+    get_savings_activity_breakdown,
+    get_savings_investments_total,
+    get_savings_net_worth,
 )
 
 # Predefined colors for categories
@@ -44,6 +49,14 @@ CATEGORY_COLORS = {
     "Travel": "#c7c7c7",
     "Ayuntamiento": "#ff6b6b",
     "Amazon (others)": "#fbb4ae",
+    "Uncategorized": "#cccccc",
+}
+
+# Colors for savings account categories
+SAVINGS_CATEGORY_COLORS = {
+    "Investments": "#1f77b4",
+    "Internal Transfer": "#2ca02c",
+    "Fees": "#d62728",
     "Uncategorized": "#cccccc",
 }
 
@@ -663,6 +676,285 @@ def display_uncategorized(df):
         )
 
 
+def display_savings_balance_chart(df):
+    """Display savings account balance timeseries."""
+    st.subheader("Savings Account Balance")
+
+    timeseries = get_savings_balance_timeseries(df)
+
+    if len(timeseries) == 0:
+        st.info("No savings data available")
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=timeseries["date"],
+        y=timeseries["balance"],
+        mode="lines",
+        name="Balance",
+        line=dict(color="#1f77b4", width=2),
+        fill="tozeroy",
+        fillcolor="rgba(31, 119, 180, 0.2)",
+        hovertemplate="<b>%{x|%d/%m/%Y}</b><br>€%{y:,.0f}<extra></extra>"
+    ))
+
+    fig.update_layout(
+        title="Savings Account Balance Over Time",
+        xaxis_title="Date",
+        yaxis_title="Balance (€)",
+        hovermode="x unified",
+        height=400,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def display_savings_monthly_growth(df):
+    """Display month-over-month savings growth with balance timeseries and growth bars."""
+    st.subheader("Savings Growth Analysis")
+
+    monthly = get_savings_monthly_growth(df)
+    timeseries = get_savings_balance_timeseries(df)
+
+    if len(monthly) < 2:
+        st.info("Not enough data for MoM comparison")
+        return
+
+    # Calculate metrics
+    latest = monthly.iloc[-1]
+    investments_total = get_savings_investments_total(df)
+    net_worth = get_savings_net_worth(df)
+    previous_net_worth = latest["previous_balance"] + investments_total if pd.notna(latest["previous_balance"]) else net_worth
+    net_worth_growth = net_worth - previous_net_worth
+    net_worth_growth_pct = (net_worth_growth / previous_net_worth * 100) if previous_net_worth > 0 else 0
+
+    # Display as metrics (5 columns)
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        st.metric("Current Balance", f"€{latest['month_end_balance']:,.0f}")
+
+    with col2:
+        st.metric("Investments", f"€{investments_total:,.0f}")
+
+    with col3:
+        st.metric("Total Net Worth", f"€{net_worth:,.0f}")
+
+    with col4:
+        growth_pct = latest["growth_pct"]
+        st.metric(
+            "MoM Growth",
+            f"€{latest['growth']:,.0f}",
+            delta=f"{growth_pct:+.1f}%",
+            delta_color="normal"
+        )
+
+    with col5:
+        st.metric(
+            "Net Worth Growth",
+            f"€{net_worth_growth:,.0f}",
+            delta=f"{net_worth_growth_pct:+.1f}%",
+            delta_color="normal"
+        )
+
+    st.markdown("---")
+
+    # Prepare stacked area data: balance and cumulative investments over time
+    df_copy = df.copy()
+    if "category" not in df_copy.columns:
+        df_copy["category"] = df_copy["description"].apply(categorize_savings_transaction)
+
+    df_copy = df_copy.sort_values("date")
+    df_copy["investments_cumulative"] = (
+        df_copy[df_copy["category"] == "Investments"]["amount"]
+        .apply(lambda x: abs(x) if x < 0 else 0)
+        .cumsum()
+        .reindex(df_copy.index, fill_value=0)
+    )
+
+    # Get daily data with balance and cumulative investments
+    timeseries_extended = df_copy.groupby("date").agg({
+        "balance": "last",
+        "investments_cumulative": "last"
+    }).reset_index().sort_values("date")
+
+    # Create subplots: Stacked area (top) and monthly growth bars (bottom) with shared x-axis
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=("Net Worth Composition", "Monthly Growth"),
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+    )
+
+    # Add balance area (bottom layer)
+    fig.add_scatter(
+        x=timeseries_extended["date"],
+        y=timeseries_extended["balance"],
+        mode="lines",
+        name="Balance",
+        line=dict(color="#1f77b4", width=0),
+        fillcolor="rgba(31, 119, 180, 0.6)",
+        stackgroup="one",
+        hovertemplate="<b>%{x|%d/%m/%Y}</b><br>Balance: €%{y:,.0f}<extra></extra>",
+        row=1, col=1
+    )
+
+    # Add investments area (top layer)
+    fig.add_scatter(
+        x=timeseries_extended["date"],
+        y=timeseries_extended["investments_cumulative"],
+        mode="lines",
+        name="Investments",
+        line=dict(color="#2ca02c", width=0),
+        fillcolor="rgba(44, 160, 44, 0.6)",
+        stackgroup="one",
+        hovertemplate="<b>%{x|%d/%m/%Y}</b><br>Investments: €%{y:,.0f}<extra></extra>",
+        row=1, col=1
+    )
+
+    # Prepare waterfall data: net worth progression by month
+    waterfall_data = monthly.copy()
+    waterfall_data["net_worth"] = waterfall_data["month_end_balance"] + investments_total
+
+    # Build waterfall structure
+    waterfall_x = []
+    waterfall_y = []
+    waterfall_measure = []
+    waterfall_base = 0
+
+    # Add initial balance
+    if len(waterfall_data) > 0:
+        initial_nw = waterfall_data.iloc[0]["net_worth"]
+        waterfall_x.append(waterfall_data.iloc[0]["year_month"])
+        waterfall_y.append(initial_nw)
+        waterfall_measure.append("absolute")
+        waterfall_base = initial_nw
+
+        # Add monthly growths
+        for idx in range(1, len(waterfall_data)):
+            month = waterfall_data.iloc[idx]["year_month"]
+            current_nw = waterfall_data.iloc[idx]["net_worth"]
+            growth = current_nw - waterfall_data.iloc[idx - 1]["net_worth"]
+
+            waterfall_x.append(month)
+            waterfall_y.append(growth)
+            waterfall_measure.append("relative")
+
+    # Add waterfall chart (bottom)
+    fig.add_waterfall(
+        x=waterfall_x,
+        y=waterfall_y,
+        measure=waterfall_measure,
+        name="Net Worth",
+        connector=dict(line=dict(color="rgba(100, 100, 100, 0.5)")),
+        increasing=dict(marker=dict(color="rgba(44, 160, 44, 0.7)")),
+        decreasing=dict(marker=dict(color="rgba(214, 39, 40, 0.7)")),
+        totals=dict(marker=dict(color="rgba(31, 119, 180, 0.7)")),
+        hovertemplate="<b>%{x}</b><br>€%{y:,.0f}<extra></extra>",
+        row=2, col=1
+    )
+
+    fig.update_yaxes(title_text="Net Worth (€)", row=1, col=1)
+    fig.update_yaxes(title_text="Net Worth (€)", row=2, col=1)
+    fig.update_xaxes(title_text="Date", row=2, col=1)
+
+    fig.update_layout(
+        height=600,
+        hovermode="x unified",
+        showlegend=False,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def display_savings_activity(df):
+    """Display savings activity breakdown by category and transactions."""
+    st.subheader("Activity Breakdown")
+
+    # Add category column if not present
+    if "category" not in df.columns:
+        df["category"] = df["description"].apply(categorize_savings_transaction)
+
+    breakdown = get_savings_activity_breakdown(df)
+
+    if len(breakdown) == 0:
+        st.info("No activity data available")
+        return
+
+    # Display summary table
+    display_df = breakdown.copy()
+    display_df["inflows"] = display_df["inflows"].apply(lambda x: f"€{x:,.0f}")
+    display_df["outflows"] = display_df["outflows"].apply(lambda x: f"€{x:,.0f}")
+    display_df["net"] = display_df["net"].apply(lambda x: f"€{x:,.0f}")
+
+    st.markdown("#### Summary by Category")
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # Net activity chart
+    chart_df = breakdown.sort_values("net", ascending=True)
+    bar_colors = [SAVINGS_CATEGORY_COLORS.get(cat, SAVINGS_CATEGORY_COLORS["Uncategorized"]) for cat in chart_df["category"]]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=chart_df["category"],
+        x=chart_df["net"],
+        orientation="h",
+        marker=dict(color=bar_colors),
+        text=[f"€{val:,.0f}" for val in chart_df["net"]],
+        textposition="outside",
+        hovertemplate="%{y}<br>€%{x:,.0f}<extra></extra>"
+    ))
+
+    fig.update_layout(
+        title="Net Activity by Category",
+        xaxis_title="Amount (€)",
+        height=350,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+
+    # Transactions table
+    st.markdown("#### Categorized Transactions")
+
+    # Filter and sort transactions
+    df_sorted = df.sort_values("date", ascending=False).copy()
+    df_sorted["date"] = df_sorted["date"].dt.strftime("%d/%m/%Y")
+
+    # Display table
+    display_df = df_sorted[["date", "description", "amount", "category", "balance"]].copy()
+    display_df["amount"] = display_df["amount"].apply(lambda x: f"€{x:,.2f}")
+    display_df["balance"] = display_df["balance"].apply(lambda x: f"€{x:,.2f}")
+
+    st.info(f"Showing {len(display_df)} transactions")
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+
+def display_savings(df_savings):
+    """Display savings account analysis tab."""
+    st.subheader("Savings Account Analysis")
+
+    if df_savings is None or len(df_savings) == 0:
+        st.info("No savings account data available")
+        return
+
+    # Add category column
+    if "category" not in df_savings.columns:
+        df_savings["category"] = df_savings["description"].apply(categorize_savings_transaction)
+
+    # Create tabs for different views
+    tab1, tab2 = st.tabs(["Growth", "Activity"])
+
+    with tab1:
+        display_savings_monthly_growth(df_savings)
+
+    with tab2:
+        display_savings_activity(df_savings)
+
+
 def main():
     """Main app."""
     st.title("💰 Personal Finance Analysis")
@@ -678,7 +970,14 @@ def main():
         st.error("No data loaded. Please upload a CSV file or add files to the data/ folder.")
         st.stop()
 
-    # Add categories
+    # Load savings account data separately
+    df_savings = load_savings_csv("data", "savings_account.csv")
+
+    # Filter out savings account from main dataframe (if it's included)
+    if df_savings is not None and "account" in df.columns:
+        df = df[df["account"] != "savings_account"].copy()
+
+    # Add categories (only to checking/spending account data)
     add_categories(df)
 
     # Calculate stats
@@ -688,7 +987,10 @@ def main():
     display_overview(df, stats)
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Categories", "Time Series", "Transactions", "Uncategorized"])
+    if df_savings is not None and len(df_savings) > 0:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Categories", "Time Series", "Savings", "Transactions", "Uncategorized"])
+    else:
+        tab1, tab2, tab3, tab4 = st.tabs(["Categories", "Time Series", "Transactions", "Uncategorized"])
 
     with tab1:
         display_categories(df)
@@ -696,11 +998,21 @@ def main():
     with tab2:
         display_time_series(df)
 
-    with tab3:
-        display_transactions(df)
+    if df_savings is not None and len(df_savings) > 0:
+        with tab3:
+            display_savings(df_savings)
+        
+        with tab4:
+            display_transactions(df)
 
-    with tab4:
-        display_uncategorized(df)
+        with tab5:
+            display_uncategorized(df)
+    else:
+        with tab4:
+            display_transactions(df)
+
+        with tab5:
+            display_uncategorized(df)
 
 
 if __name__ == "__main__":

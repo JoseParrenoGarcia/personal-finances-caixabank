@@ -16,12 +16,14 @@ CATEGORY_MAPPING = {
     "FRUTES PEPET": "Groceries",
     "LILLYDOO GMBH": "Groceries",
     "HERBASANA": "Groceries",
-    "L ALAMEDA CARNICER": "Groceries",
+    "L ALAMEDA CARNICE": "Groceries",
     "PESCADOS PACO": "Groceries",
     "CARREF ALFAFAR": "Groceries",
     "SILVESTRE AGRICUl": "Groceries",
-    "CARNICERIA MONTANA": "Groceries",
+    "CARNICE": "Groceries",
     "POLLOS CRESPO": "Groceries",
+    "AGRONOI": "Groceries",
+    "ESTELLES RUZAFA E": "Groceries",
 
     # Amazon
     "AMZN Mktp": "Amazon (others)",
@@ -31,7 +33,10 @@ CATEGORY_MAPPING = {
     # Utilities
     "NATURGY": "Energy",
     "ENDESA": "Energy",
+    "Luz": "Energy",
     "GLOBAL OMNIUM INV": "Water",
+    "GASEXPRESS E.S. F": "Gasolina",
+    "REPSOL": "Gasolina",
 
     # Transport & Fuel
     "RENFE": "Transport",
@@ -41,6 +46,7 @@ CATEGORY_MAPPING = {
     "UBER": "Transport",
     "BUS": "Transport",
     "METRO": "Transport",
+    "FURGO CAR SA": "Transport",
 
     # Insurance
     "LINEA DIRECTA": "Insurance",
@@ -62,6 +68,7 @@ CATEGORY_MAPPING = {
     # Income
     "NOMINA": "Income",
     "BIZUM RECIBIDO": "Income",
+    "TRANSF. A SU FAVOR": "Income",
 
     # Pharmacy
     "FARMACIA": "Pharmacy",
@@ -83,6 +90,9 @@ CATEGORY_MAPPING = {
     "AMAZON": "Shopping",
     "DECATHLON": "Shopping",
     "Lefties.com": "Shopping",
+    "SPORTS DIRECT": "Shopping",
+    "TIENDA VCF COLON": "Shopping",
+    "SP MURIS BRANDS": "Shopping",
 
     # Restaurants & Dining
     "RESTAURANT": "Dining",
@@ -113,6 +123,9 @@ CATEGORY_MAPPING = {
 
     # House
     "PRES.32271394678": "House",
+    "Sofa": "House",
+    "DeLonghi": "House",
+    "LEROY MERLIN": "House",
 
     # Travel
     "BKG*BOOKING.COM F": "Travel",
@@ -122,7 +135,7 @@ CATEGORY_MAPPING = {
     "EASYJET": "Travel",
     "SP HOLAFLY.COM": "Travel",
     "UKVI ETA": "Travel",
-    "IBERIA LAE SA OPER": "Travel",
+    "IBERIA": "Travel",
 
     # Ayuntamiento
     "TRIBUTOS": "Ayuntamiento",
@@ -131,6 +144,53 @@ CATEGORY_MAPPING = {
 
 
 }
+
+# Savings account categorization
+SAVINGS_CATEGORY_MAPPING = {
+    # Investments
+    "COMP.LU": "Investments",
+    "FMRTOEST": "Investments",
+
+    # Internal Transfers (movements between savings accounts)
+    "TRASPASO PROPIO": "Internal Transfer",
+
+    # Fees
+    "P.SERV": "Fees",
+    "COMISION": "Fees",
+
+    # Others
+    "BYD": "Compra BYD Dolphin",
+    "HACIENDA": "Hacienda",
+    "IMPUESTO RENTA": "Hacienda",
+    "TRASPASO DE FONDOS": "Amortizacion hipoteca",
+    "TRANSF. A SU FAVOR": "Transferencia recibida",
+    "F0001/26 - Letici": "Nerosolar",
+    "Pago 2 de 2. Leti": "Morata puertas"
+
+
+}
+
+
+def categorize_savings_transaction(description: str) -> str:
+    """
+    Categorize a savings transaction based on its description.
+
+    Uses case-insensitive keyword matching. Returns the first matching category
+    from SAVINGS_CATEGORY_MAPPING, or "Uncategorized" if no match found.
+
+    Args:
+        description: Transaction description from bank CSV
+
+    Returns:
+        Category name (str)
+    """
+    description_upper = description.upper()
+
+    for keyword, category in SAVINGS_CATEGORY_MAPPING.items():
+        if keyword.upper() in description_upper:
+            return category
+
+    return "Uncategorized"
 
 
 def categorize_transaction(description: str) -> str:
