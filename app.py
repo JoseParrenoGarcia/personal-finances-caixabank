@@ -2,23 +2,20 @@
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
-import os
 
-from data_loader import load_csv, load_csv_from_bytes, load_all_csv_files
+from data_loader import load_csv_from_bytes, load_all_csv_files
 from categories import add_categories
 from analysis import (
-    daily_totals,
     monthly_summary,
     yearly_summary,
     category_breakdown,
-    category_breakdown_with_averages,
-    top_merchants,
     get_uncategorized,
     get_summary_stats,
+    calculate_burn_rate,
+    get_category_spend_6months,
 )
 
 # Predefined colors for categories
@@ -102,31 +99,112 @@ def load_data():
 
 
 def display_overview(df, stats):
-    """Display monthly metrics for current and previous 2 months."""
-    # Get monthly summary
+    """Display last 3 months with MoM deltas for all metrics."""
     monthly = monthly_summary(df)
 
-    # Get last 3 months (most recent first)
-    if len(monthly) > 0:
-        last_3_months = monthly.tail(3).iloc[::-1]  # Reverse to show most recent first
-    else:
-        last_3_months = monthly
+    if len(monthly) == 0:
+        st.info("No data available for overview")
+        return
 
-    # Display metrics for each month
+    # Get last 3 months (most recent first)
+    last_3_months = monthly.tail(3).iloc[::-1].reset_index(drop=True)
+
+    # For each month, calculate burn rate and prepare deltas
+    months_data = []
     for idx, row in last_3_months.iterrows():
-        col1, col2, col3, col4 = st.columns(4)
+        month_str = row["year_month"]
+        burn_rate_data = calculate_burn_rate(df, month_str)
+
+        months_data.append({
+            "month": month_str,
+            "income": row["income"],
+            "expenses": row["expenses"],
+            "net": row["net"],
+            "burn_rate": burn_rate_data["burn_rate_per_day"],
+        })
+
+    # Display each month as a row with 5 columns: Month, Income, Expenses, Net, Burn Rate
+    for i, month_data in enumerate(months_data):
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-            st.metric("Month", row["year_month"])
+            st.metric("Month", month_data["month"])
 
         with col2:
-            st.metric("Income", f"€{row['income']:,.2f}")
+            # Income with MoM delta (normal colors: green up, red down)
+            delta_income = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_income = months_data[i + 1]["income"]
+                delta_pct = (
+                    ((month_data["income"] - prev_income) / prev_income * 100)
+                    if prev_income != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_income = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Income",
+                f"€{month_data['income']:,.0f}",
+                delta=delta_income,
+                delta_color="normal"
+            )
 
         with col3:
-            st.metric("Expenses", f"€{row['expenses']:,.2f}")
+            # Expenses with MoM delta (inverse colors: green down, red up)
+            delta_expenses = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_expenses = months_data[i + 1]["expenses"]
+                delta_pct = (
+                    ((month_data["expenses"] - prev_expenses) / prev_expenses * 100)
+                    if prev_expenses != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_expenses = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Expenses",
+                f"€{month_data['expenses']:,.0f}",
+                delta=delta_expenses,
+                delta_color="inverse"
+            )
 
         with col4:
-            st.metric("Net", f"€{row['net']:,.2f}")
+            # Net with MoM delta (normal colors: green up, red down)
+            delta_net = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_net = months_data[i + 1]["net"]
+                delta_pct = (
+                    ((month_data["net"] - prev_net) / abs(prev_net) * 100)
+                    if prev_net != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_net = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Net",
+                f"€{month_data['net']:,.0f}",
+                delta=delta_net,
+                delta_color="normal"
+            )
+
+        with col5:
+            # Burn Rate with MoM delta (inverse colors: green down, red up)
+            delta_burn = None
+            if i < len(months_data) - 1:  # Not the oldest month
+                prev_burn = months_data[i + 1]["burn_rate"]
+                delta_pct = (
+                    ((month_data["burn_rate"] - prev_burn) / prev_burn * 100)
+                    if prev_burn != 0 else None
+                )
+                if delta_pct is not None:
+                    delta_burn = f"{delta_pct:+.1f}%"
+
+            st.metric(
+                "Burn Rate",
+                f"€{month_data['burn_rate']:,.0f}/day",
+                delta=delta_burn,
+                delta_color="inverse"
+            )
 
     st.markdown("---")
 
@@ -297,8 +375,8 @@ def display_category_transactions(df, category, month_str):
         st.info(f"No transactions found for {category} in {month_str}")
         return
 
-    # Sort by date descending
-    df_filtered = df_filtered.sort_values("date", ascending=False)
+    # Sort by absolute amount descending (highest to lowest)
+    df_filtered = df_filtered.sort_values("amount", key=lambda x: abs(x), ascending=False)
 
     # Display summary
     total_amount = df_filtered["amount"].sum()
@@ -314,11 +392,57 @@ def display_category_transactions(df, category, month_str):
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
+def display_stacked_area_chart(df):
+    """Display stacked area chart showing spending composition over 6 months."""
+    st.subheader("Spending Composition (6 Months)")
+
+    # Get 6-month category data
+    spend_data = get_category_spend_6months(df)
+
+    if len(spend_data) == 0:
+        st.info("Not enough data for 6-month comparison")
+        return
+
+    # Create pivot table: months as index, categories as columns
+    pivot_data = spend_data.pivot(index="month", columns="category", values="total").fillna(0)
+
+    # Sort categories by latest month spending (descending)
+    latest_month = pivot_data.index[-1]
+    category_order = pivot_data.loc[latest_month].sort_values(ascending=False).index.tolist()
+
+    # Create stacked area chart
+    fig = go.Figure()
+
+    # Add traces in sorted order (latest month spending from high to low)
+    for category in category_order:
+        color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["Uncategorized"])
+        fig.add_trace(go.Scatter(
+            x=pivot_data.index,
+            y=pivot_data[category],
+            mode="lines",
+            name=category,
+            line=dict(color=color, width=2),
+            fillcolor=color,
+            stackgroup="one",
+            hovertemplate=f"{category}<br>€%{{y:,.0f}}<extra></extra>",
+        ))
+
+    fig.update_layout(
+        title="Category Spending Trends (6 Months)",
+        xaxis_title="Month",
+        yaxis_title="Spending (€)",
+        hovermode="x unified",
+        height=500,
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def display_categories(df):
     """Display category analysis for current and previous 2 months."""
     st.subheader("Category Analysis")
 
-    tab1, tab2 = st.tabs(["Horizontal Bar" , "TBC"])
+    tab1, tab2 = st.tabs(["Horizontal Bar", "Spending Trends"])
 
     with tab1:
         col1, col2 = st.columns([2, 1])
@@ -344,6 +468,9 @@ def display_categories(df):
             # Display transactions for selected month and category
             if selected_month and selected_category:
                 display_category_transactions(df, selected_category, selected_month)
+
+    with tab2:
+        display_stacked_area_chart(df)
 
 
 def display_transactions(df):
@@ -428,13 +555,13 @@ def main():
     display_overview(df, stats)
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Time Series", "Categories", "Transactions", "Uncategorized"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Categories", "Time Series", "Transactions", "Uncategorized"])
 
     with tab1:
-        display_time_series(df)
+        display_categories(df)
 
     with tab2:
-        display_categories(df)
+        display_time_series(df)
 
     with tab3:
         display_transactions(df)

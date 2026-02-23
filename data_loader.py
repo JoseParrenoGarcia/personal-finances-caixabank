@@ -2,6 +2,7 @@ import pandas as pd
 import io
 from typing import Union
 from pathlib import Path
+import streamlit as st
 
 # Transactions to exclude (internal transfers, etc.)
 EXCLUDE_KEYWORDS = ["TRASPASO PROPIO"]
@@ -30,6 +31,7 @@ def parse_date(date_str: str) -> pd.Timestamp:
     return pd.to_datetime(date_str, format="%d/%m/%Y")
 
 
+@st.cache_data(ttl=3600)
 def load_csv(filepath: str) -> pd.DataFrame:
     """
     Load and parse CaixaBank CSV file.
@@ -76,6 +78,7 @@ def load_csv(filepath: str) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=3600)
 def load_csv_from_bytes(file_bytes: Union[bytes, io.BytesIO]) -> pd.DataFrame:
     """
     Load and parse CaixaBank CSV from uploaded file bytes.
@@ -132,6 +135,7 @@ def _filter_excluded_transactions(df: pd.DataFrame) -> pd.DataFrame:
     return df[mask]
 
 
+@st.cache_data(ttl=3600)
 def load_all_csv_files(data_folder: str = "data") -> pd.DataFrame:
     """
     Load and merge all CSV files from data folder.
