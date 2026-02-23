@@ -425,11 +425,15 @@ def display_stacked_area_chart(df):
     # Create pivot table: months as index, categories as columns
     pivot_data = spend_data.pivot(index="month", columns="category", values="total").fillna(0)
 
+    # Sort categories by latest month spending (descending)
+    latest_month = pivot_data.index[-1]
+    category_order = pivot_data.loc[latest_month].sort_values(ascending=False).index.tolist()
+
     # Create stacked area chart
     fig = go.Figure()
 
-    # Add a trace for each category
-    for category in pivot_data.columns:
+    # Add traces in sorted order (latest month spending from high to low)
+    for category in category_order:
         color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["Uncategorized"])
         fig.add_trace(go.Scatter(
             x=pivot_data.index,
