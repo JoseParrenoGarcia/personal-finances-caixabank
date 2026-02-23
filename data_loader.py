@@ -1,6 +1,7 @@
 import pandas as pd
 import io
 from typing import Union
+from pathlib import Path
 
 # Transactions to exclude (internal transfers, etc.)
 EXCLUDE_KEYWORDS = ["TRASPASO PROPIO"]
@@ -129,3 +130,36 @@ def _filter_excluded_transactions(df: pd.DataFrame) -> pd.DataFrame:
     """
     mask = ~df["Concepto"].str.contains("|".join(EXCLUDE_KEYWORDS), case=False, na=False)
     return df[mask]
+
+
+def load_all_csv_files(data_folder: str = "data") -> pd.DataFrame:
+    """
+    Load and merge all CSV files from data folder.
+    Adds 'account' column to identify which file each transaction came from.
+
+    Args:
+        data_folder: Path to folder containing CSV files
+
+    Returns:
+        Merged DataFrame with all transactions and account column, or None if no files found
+    """
+    data_path = Path(data_folder)
+    csv_files = list(data_path.glob("*.csv")) if data_path.exists() else []
+
+    if not csv_files:
+        return None
+
+    dfs = []
+    for filepath in sorted(csv_files):
+        try:
+            df = load_csv(str(filepath))
+            # Add account column based on filename (without .csv extension)
+            df["account"] = filepath.stem
+            dfs.append(df)
+        except Exception as e:
+            print(f"Warning: Failed to load {filepath}: {e}")
+
+    if dfs:
+        merged_df = pd.concat(dfs, ignore_index=True).sort_values("date").reset_index(drop=True)
+        return merged_df
+    return None
