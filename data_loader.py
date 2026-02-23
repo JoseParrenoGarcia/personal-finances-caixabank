@@ -5,7 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 # Transactions to exclude (internal transfers, etc.)
-EXCLUDE_KEYWORDS = ["TRASPASO PROPIO"]
+EXCLUDE_KEYWORDS = ["TRASPASO PROPIO", "AMORT. PRESTAMO"]
 
 
 def parse_amount(amount_str: str) -> float:
@@ -167,3 +167,29 @@ def load_all_csv_files(data_folder: str = "data") -> pd.DataFrame:
         merged_df = pd.concat(dfs, ignore_index=True).sort_values("date").reset_index(drop=True)
         return merged_df
     return None
+
+
+@st.cache_data(ttl=3600)
+def load_savings_csv(data_folder: str = "data", filename: str = "savings_account.csv") -> pd.DataFrame:
+    """
+    Load savings account CSV file separately from checking accounts.
+
+    Args:
+        data_folder: Path to folder containing CSV files
+        filename: Name of savings account CSV file
+
+    Returns:
+        DataFrame with savings account data, or None if file not found
+    """
+    data_path = Path(data_folder) / filename
+
+    if not data_path.exists():
+        return None
+
+    try:
+        df = load_csv(str(data_path))
+        df["account"] = data_path.stem
+        return df
+    except Exception as e:
+        print(f"Warning: Failed to load {data_path}: {e}")
+        return None

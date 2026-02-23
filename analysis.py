@@ -572,6 +572,121 @@ def get_unusual_amounts(df: pd.DataFrame, multiplier: float = 2.0, limit: int = 
 
 
 @st.cache_data(ttl=3600)
+def get_savings_balance_timeseries(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Get savings account balance over time (daily, latest balance per day).
+
+    Args:
+        df: DataFrame with 'date' and 'balance' columns
+
+    Returns:
+        DataFrame with columns: date, balance
+    """
+    df_copy = df.copy()
+    # Get latest balance per day (most recent transaction per day)
+    df_daily = df_copy.sort_values("date").groupby("date").last().reset_index()
+    return df_daily[["date", "balance"]].sort_values("date")
+
+
+@st.cache_data(ttl=3600)
+def get_savings_monthly_growth(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate month-end balance and MoM growth for savings account.
+
+    Args:
+        df: DataFrame with 'date' and 'balance' columns
+
+    Returns:
+        DataFrame with columns: year_month, month_end_balance, previous_balance, growth, growth_pct
+    """
+    df_copy = df.copy()
+    df_copy["year_month"] = df_copy["date"].dt.to_period("M").astype(str)
+
+    # Get month-end balance (latest balance for each month)
+    monthly_balances = df_copy.sort_values("date").groupby("year_month")["balance"].last().reset_index()
+    monthly_balances.columns = ["year_month", "month_end_balance"]
+
+    # Calculate MoM growth
+    monthly_balances["previous_balance"] = monthly_balances["month_end_balance"].shift(1)
+    monthly_balances["growth"] = monthly_balances["month_end_balance"] - monthly_balances["previous_balance"]
+    monthly_balances["growth_pct"] = (
+        (monthly_balances["growth"] / monthly_balances["previous_balance"] * 100)
+        .fillna(0)
+    )
+
+    return monthly_balances
+
+
+@st.cache_data(ttl=3600)
+def get_savings_investments_total(df: pd.DataFrame) -> float:
+    """
+    Calculate total invested amount (sum of all outflows with Investments category).
+
+    Args:
+        df: DataFrame with 'amount' and 'category' columns
+
+    Returns:
+        Total invested amount (as positive value)
+    """
+    if "category" not in df.columns:
+        return 0.0
+
+    investments = df[(df["category"] == "Investments") & (df["amount"] < 0)]
+    return abs(investments["amount"].sum())
+
+
+@st.cache_data(ttl=3600)
+def get_savings_net_worth(df: pd.DataFrame) -> float:
+    """
+    Calculate total net worth (current balance + total investments).
+
+    Args:
+        df: DataFrame with 'balance' and 'amount' columns
+
+    Returns:
+        Net worth (balance + investments)
+    """
+    if len(df) == 0:
+        return 0.0
+
+    current_balance = df.sort_values("date").iloc[-1]["balance"]
+
+    if "category" not in df.columns:
+        return current_balance
+
+    investments = df[(df["category"] == "Investments") & (df["amount"] < 0)]
+    total_invested = abs(investments["amount"].sum())
+
+    return current_balance + total_invested
+
+
+@st.cache_data(ttl=3600)
+def get_savings_activity_breakdown(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate activity (inflows/outflows) by category for savings account.
+
+    Args:
+        df: DataFrame with 'category' and 'amount' columns
+
+    Returns:
+        DataFrame with columns: category, inflows, outflows, net, count
+    """
+    df_copy = df.copy()
+
+    breakdown = df_copy.groupby("category").apply(
+        lambda x: pd.Series({
+            "inflows": x[x["amount"] > 0]["amount"].sum(),
+            "outflows": abs(x[x["amount"] < 0]["amount"].sum()),
+            "net": x["amount"].sum(),
+            "count": len(x),
+        })
+    ).reset_index()
+
+    breakdown = breakdown.sort_values("net", ascending=False).reset_index(drop=True)
+    return breakdown
+
+
+@st.cache_data(ttl=3600)
 def get_category_comparison_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compare each category's spending across current month, last month, and 3-month average.
